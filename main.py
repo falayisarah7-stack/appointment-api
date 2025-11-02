@@ -30,11 +30,11 @@ def test_ghl_api():
         "Authorization": f"Bearer {api_key}",
         "Accept": "application/json",
         "Content-Type": "application/json",
-        "Version": "2021-07-28"  # ✅ GHL requires this header
+        "Version": "2021-07-28"
     }
 
-    # Safer test endpoint to validate credentials
-    url = f"{base_url}/users/me"
+    # ✅ use location-level endpoint
+    url = f"{base_url}/contacts/"
 
     try:
         resp = requests.get(url, headers=headers, timeout=10)
