@@ -15,42 +15,25 @@ def read_root():
     }
 
 # New endpoint to test GHL environment variables
-@app.get("/test-ghl-api")
-def test_ghl_api():
-    import traceback
+@app.get("/send-webhook-test")
+def send_webhook_test():
     import requests
 
-    api_key = os.getenv("GHL_API_KEY")
-    base_url = os.getenv("GHL_BASE_URL")
+    webhook_url = "https://services.leadconnectorhq.com/hooks/YY6x7gRvUfJYLcYjYg31/webhook-trigger/bc4c12a6-3c38-4038-845f-86e87847bd6d"
 
-    if not api_key:
-        return {"error": "GHL_API_KEY not found in env"}
-
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Accept": "application/json",
-        "Content-Type": "application/json",
-        "Version": "2021-07-28"
+    data = {
+        "client_name": "John Doe",
+        "client_email": "john@example.com",
+        "client_phone": "+1234567890",
+        "deal_name": "Sample Investment Deal",
+        "deal_amount": 50000,
+        "deal_type": "Equity",
+        "deal_stage": "Negotiation",
+        "company_location": "New York"
     }
 
-    # ✅ use location-level endpoint
-    url = f"{base_url}/contacts/"
-
-    try:
-        resp = requests.get(url, headers=headers, timeout=10)
-    except Exception as e:
-        return {
-            "status": "request_exception",
-            "error_type": type(e).__name__,
-            "error_message": str(e),
-            "trace": traceback.format_exc().splitlines()[-6:]
-        }
-
-    result = {"status_code": resp.status_code}
-    try:
-        result["body_json"] = resp.json()
-    except Exception:
-        text = resp.text if len(resp.text) < 2000 else resp.text[:2000] + "...(truncated)"
-        result["body_text_snippet"] = text
-
-    return result
+    response = requests.post(webhook_url, json=data)
+    return {
+        "status_code": response.status_code,
+        "response_text": response.text
+    }
