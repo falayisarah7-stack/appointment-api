@@ -14,14 +14,6 @@ def read_root():
     }
 
 # New endpoint to test GHL environment variables
-@app.get("/test-ghl")
-def test_ghl():
-    api_key = os.getenv("GHL_API_KEY")
-    base_url = os.getenv("GHL_BASE_URL")
-    return {"GHL_API_KEY": api_key, "GHL_BASE_URL": base_url}
-
-import requests
-
 @app.get("/test-ghl-api")
 def test_ghl_api():
     api_key = os.getenv("GHL_API_KEY")
@@ -33,8 +25,8 @@ def test_ghl_api():
         "Content-Type": "application/json"
     }
 
-    # Example call: get locations linked to this account
-    url = f"{base_url}/locations/"
+    # ✅ Correct test endpoint
+    url = f"{base_url}/users/me"
 
     response = requests.get(url, headers=headers)
     try:
