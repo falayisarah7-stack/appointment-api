@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 import os
+import requests 
 
 app = FastAPI()
 
