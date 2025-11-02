@@ -9,7 +9,7 @@ def root():
 
 @app.get("/send-test-webhook")
 def send_test_webhook():
-    url = "https://services.leadconnectorhq.com/hooks/YY6x7gRvUfJYLcYjYg31/webhook-trigger/bc4c12a6-3c38-4038-845f-86e87847bd6d"
+    url = "https://services.leadconnectorhq.com/hooks/YY6x7gRvUfJYLcYjYg31/webhook-trigger/c6ba77bf-91f5-48ba-b331-fc0d38465662"
 
     payload = {
         "test_contact": {
