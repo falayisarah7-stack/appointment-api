@@ -18,6 +18,8 @@ def read_root():
 @app.get("/test-ghl-api")
 def test_ghl_api():
     import traceback
+    import requests
+
     api_key = os.getenv("GHL_API_KEY")
     base_url = os.getenv("GHL_BASE_URL")
 
@@ -27,16 +29,16 @@ def test_ghl_api():
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Accept": "application/json",
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        "Version": "2021-07-28"  # ✅ GHL requires this header
     }
 
-    # safe test path
+    # Safer test endpoint to validate credentials
     url = f"{base_url}/users/me"
 
     try:
         resp = requests.get(url, headers=headers, timeout=10)
     except Exception as e:
-        # return a safe error trace (no secrets)
         return {
             "status": "request_exception",
             "error_type": type(e).__name__,
@@ -44,12 +46,10 @@ def test_ghl_api():
             "trace": traceback.format_exc().splitlines()[-6:]
         }
 
-    # return both status and body (if body is JSON, parse; otherwise return text)
     result = {"status_code": resp.status_code}
     try:
         result["body_json"] = resp.json()
     except Exception:
-        # return beginning of text to avoid huge or secret dumps
         text = resp.text if len(resp.text) < 2000 else resp.text[:2000] + "...(truncated)"
         result["body_text_snippet"] = text
 
