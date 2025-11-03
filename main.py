@@ -1,21 +1,28 @@
-from fastapi import FastAPI
-import os, requests
+from flask import Flask, request, jsonify
 
-app = FastAPI()
+app = Flask(__name__)
 
-@app.get("/")
-def root():
-    return {"message": "API is running"}
+@app.route('/', methods=['POST'])
+def receive_webhook():
+    try:
+        data = request.json
+        print("✅ Webhook data received:", data)
 
-@app.get("/send-contact-test")
-def send_contact_test():
-    import requests, json, os
-    url = "https://services.leadconnectorhq.com/hooks/YY6x7gRvUfJYLcYjYg31/webhook-trigger/c6ba77bf-91f5-48ba-b331-fc0d38465662"
-    payload = {
-        "firstName": "John",
-        "lastName": "Doe",
-        "email": "john.doe@example.com",
-        "phone": "+1234567890"
-    }
-    resp = requests.post(url, json=payload)
-    return {"status_code": resp.status_code, "body": resp.text}
+        # Extract useful info (update this as needed)
+        first_name = data.get('firstName') or data.get('first_name')
+        email = data.get('email')
+        phone = data.get('phone')
+
+        print(f"Contact Info: {first_name}, {email}, {phone}")
+
+        return jsonify({"status": "success", "message": "Data received"}), 200
+    except Exception as e:
+        print("❌ Error:", str(e))
+        return jsonify({"status": "error", "message": str(e)}), 400
+
+@app.route('/', methods=['GET'])
+def check_status():
+    return jsonify({"status": "ok", "message": "Webhook server active"})
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=10000)
