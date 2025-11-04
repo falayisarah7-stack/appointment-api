@@ -2,66 +2,92 @@ from fastapi import FastAPI, Request
 import json
 import os
 import httpx
+import traceback
 
 app = FastAPI()
 
-# Environment variables (set these in Render Dashboard > Environment)
-INSTANTLY_API_KEY = os.getenv("YTg3NTg4ZDUtYzFlYi00YmVjLWJiMTEtNTAxMjdjODhmZGI2OnhKeHZ4dU1NdnVuRA==")
-GHL_WEBHOOK_URL = os.getenv("https://services.leadconnectorhq.com/hooks/YY6x7gRvUfJYLcYjYg31/webhook-trigger/c6ba77bf-91f5-48ba-b331-fc0d38465662")
+# Helper: safe masked print for keys (do not print secrets in public chat)
+def masked(val):
+    if not val:
+        return None
+    s = str(val)
+    if len(s) > 8:
+        return s[:4] + "..." + s[-4:]
+    return s
 
 @app.post("/webhook")
 async def inbound_webhook(request: Request):
     try:
-        # Step 1: Receive data from GHL
-        incoming_data = await request.json()
-        print("✅ Incoming data from GHL:")
-        print(json.dumps(incoming_data, indent=2))
+        payload = await request.json()
+    except Exception:
+        text = await request.body()
+        payload = {"_raw_body": text.decode(errors="ignore")}
 
-        # Step 2: Send data to Instantly API
-        instantly_payload = {
-            "firstName": incoming_data.get("firstName"),
-            "lastName": incoming_data.get("lastName"),
-            "email": incoming_data.get("email"),
-            "phone": incoming_data.get("phone")
-        }
+    # 1) Log inbound payload (already done but keep it)
+    print("Received payload:", json.dumps(payload, indent=2))
 
-        instantly_headers = {
-            "accept": "application/json",
-            "content-type": "application/json",
-            "x-api-key": INSTANTLY_API_KEY
-        }
+    # 2) Read environment variables used for outgoing calls
+    INSTANTLY_API_KEY = os.getenv("YTg3NTg4ZDUtYzFlYi00YmVjLWJiMTEtNTAxMjdjODhmZGI2OnhKeHZ4dU1NdnVuRA==")
+    GHL_WEBHOOK_URL = os.getenv("https://services.leadconnectorhq.com/hooks/YY6x7gRvUfJYLcYjYg31/webhook-trigger/c6ba77bf-91f5-48ba-b331-fc0d38465662")
+    GHL_API_KEY = os.getenv("pit-2bea1d2d-a72f-4814-8f13-d93d9b0cebc4")
+    GHL_BASE_URL = os.getenv("https://services.leadconnectorhq.com")
 
-        async with httpx.AsyncClient() as client:
-            instantly_response = await client.post(
-                "https://api.instantly.ai/api/v1/contacts",  # example endpoint
-                headers=instantly_headers,
-                json=instantly_payload
-            )
+    # 3) Quick debug summary (masked)
+    debug_summary = {
+        "INSTANTLY_API_KEY": masked(INSTANTLY_API_KEY),
+        "GHL_WEBHOOK_URL": masked(GHL_WEBHOOK_URL),
+        "GHL_API_KEY": masked(GHL_API_KEY),
+        "GHL_BASE_URL": masked(GHL_BASE_URL)
+    }
+    print("Env debug:", json.dumps(debug_summary))
 
-        print("✅ Instantly response:")
-        print(instantly_response.text)
+    # 4) Validate required values and fail with clear message if missing
+    missing = []
+    if not INSTANTLY_API_KEY:
+        missing.append("INSTANTLY_API_KEY")
+    # GHL_WEBHOOK_URL may be optional for some tests - include if your flow needs it
+    if missing:
+        msg = {"error": "Missing required env variables", "missing": missing}
+        print("ERROR:", msg)
+        return {"status": "error", "detail": msg}
 
-        # Step 3: Send processed data back to GHL
-        payload_to_ghl = {
-            "contact_name": f"{incoming_data.get('firstName', '')} {incoming_data.get('lastName', '')}",
-            "email": incoming_data.get("email"),
-            "phone": incoming_data.get("phone"),
-            "source": "Instantly API",
-            "score": "85",  # Example static score (replace with real data later)
-            "status": "Processed by Render"
-        }
+    # 5) Prepare outgoing headers carefully and validate types
+    headers = {
+        "x-api-key": INSTANTLY_API_KEY,
+        # add more headers only if values exist
+    }
 
-        async with httpx.AsyncClient() as client:
-            ghl_response = await client.post(GHL_WEBHOOK_URL, json=payload_to_ghl)
+    # Defensive check: ensure all header values are str
+    bad_headers = {k: type(v).__name__ for k, v in headers.items() if v is None or not isinstance(v, (str, bytes))}
+    if bad_headers:
+        print("ERROR: header(s) not string-safe:", bad_headers)
+        return {"status": "error", "detail": "header value(s) must be str or bytes", "bad_headers": bad_headers}
 
-        print("✅ GHL response:", ghl_response.text)
-
-        return {"status": "success", "message": "Data processed and sent back to GHL"}
-
+    # 6) Example: call Instantly (adjust endpoint path later)
+    instantly_url = "https://api.instantly.ai/whatever-endpoint"  # placeholder — replace with real endpoint
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(instantly_url, json=payload, headers=headers)
+            resp_text = resp.text[:2000]
+            print("Instantly status:", resp.status_code, "body:", resp_text)
     except Exception as e:
-        print("❌ Error:", str(e))
-        return {"status": "error", "message": str(e)}
+        print("Instantly request exception:", type(e).__name__, str(e))
+        print("Trace:", "\n".join(traceback.format_exc().splitlines()[-6:]))
+        return {"status": "error", "stage": "instantly_call_failed", "error": str(e)}
 
-@app.get("/")
-def home():
-    return {"message": "Server running successfully on Render"}
+    # 7) Send result back to GHL webhook (if applicable)
+    # Build payload for GHL. Example:
+    payload_to_ghl = {
+        "scoring_result": {"instant_status": resp.status_code},
+        "original": payload
+    }
+    if GHL_WEBHOOK_URL:
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                ghl_resp = await client.post(GHL_WEBHOOK_URL, json=payload_to_ghl)
+                print("GHL webhook resp:", ghl_resp.status_code, ghl_resp.text[:1000])
+        except Exception as e:
+            print("GHL webhook exception:", type(e).__name__, str(e))
+            return {"status": "error", "stage": "ghl_post_failed", "error": str(e)}
+
+    return {"status": "success", "instantly_status": resp.status_code}
