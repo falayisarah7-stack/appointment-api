@@ -76,18 +76,27 @@ async def inbound_webhook(request: Request):
         return {"status": "error", "stage": "instantly_call_failed", "error": str(e)}
 
     # 7) Send result back to GHL webhook (if applicable)
-    # Build payload for GHL. Example:
-    payload_to_ghl = {
-        "scoring_result": {"instant_status": resp.status_code},
-        "original": payload
-    }
-    if GHL_WEBHOOK_URL:
-        try:
-            async with httpx.AsyncClient(timeout=15.0) as client:
-                ghl_resp = await client.post(GHL_WEBHOOK_URL, json=payload_to_ghl)
-                print("GHL webhook resp:", ghl_resp.status_code, ghl_resp.text[:1000])
-        except Exception as e:
-            print("GHL webhook exception:", type(e).__name__, str(e))
-            return {"status": "error", "stage": "ghl_post_failed", "error": str(e)}
+if GHL_WEBHOOK_URL:
+    try:
+        # Prepare a simplified payload to avoid nesting issues in GHL
+        data_to_send = {
+            "scoring_status": str(resp.status_code),
+            "deal_name": payload.get("Deal Name / Company", ""),
+            "industry": payload.get("Industry / Sector", ""),
+            "country": payload.get("country", ""),
+            "timestamp": payload.get("date_created", "")
+        }
 
-    return {"status": "success", "instantly_status": resp.status_code}
+        print(f"Sending to GHL inbound webhook: {GHL_WEBHOOK_URL}")
+        print(f"Payload being sent: {data_to_send}")
+
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            ghl_resp = await client.post(GHL_WEBHOOK_URL, json=data_to_send)
+            print("GHL webhook response:", ghl_resp.status_code, ghl_resp.text[:500])
+
+    except Exception as e:
+        print("Error sending data to GHL inbound webhook:", str(e))
+else:
+    print("GHL_WEBHOOK_URL not found in environment.")
+
+return {"status": "success", "instantly_status": resp.status_code}
