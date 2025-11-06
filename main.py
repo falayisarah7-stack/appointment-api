@@ -65,7 +65,7 @@ async def inbound_webhook(request: Request):
         "Content-Type": "application/json"
     }
 
-    instantly_url = "https://api.instantly.ai/api/v1/leads/add"
+    instantly_url = "https://api.instantly.ai/api/v1/leads/import"
 
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
