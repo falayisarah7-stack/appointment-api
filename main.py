@@ -10,80 +10,87 @@ def masked(val):
     if not val:
         return None
     s = str(val)
-    if len(s) > 8:
-        return s[:4] + "..." + s[-4:]
-    return s
+    return s[:4] + "..." + s[-4:] if len(s) > 8 else s
 
 @app.post("/webhook")
 async def inbound_webhook(request: Request):
     try:
         payload = await request.json()
     except Exception:
-        text = await request.body()
-        payload = {"_raw_body": text.decode(errors="ignore")}
+        raw_text = await request.body()
+        payload = {"_raw_body": raw_text.decode(errors="ignore")}
 
-    print("Received payload:", json.dumps(payload, indent=2))
+    print("=== Incoming Webhook Payload ===")
+    print(json.dumps(payload, indent=2))
 
-    # ✅ Correct environment variable references
+    # ✅ Environment variables
     INSTANTLY_API_KEY = os.getenv("INSTANTLY_API_KEY")
+    INSTANTLY_CAMPAIGN_ID = os.getenv("INSTANTLY_CAMPAIGN_ID")
     GHL_WEBHOOK_URL = os.getenv("GHL_WEBHOOK_URL")
-    GHL_API_KEY = os.getenv("GHL_API_KEY")
-    GHL_BASE_URL = os.getenv("GHL_BASE_URL")
 
-    debug_summary = {
+    debug_env = {
         "INSTANTLY_API_KEY": masked(INSTANTLY_API_KEY),
-        "GHL_WEBHOOK_URL": masked(GHL_WEBHOOK_URL),
-        "GHL_API_KEY": masked(GHL_API_KEY),
-        "GHL_BASE_URL": masked(GHL_BASE_URL)
+        "INSTANTLY_CAMPAIGN_ID": masked(INSTANTLY_CAMPAIGN_ID),
+        "GHL_WEBHOOK_URL": masked(GHL_WEBHOOK_URL)
     }
-    print("Env debug:", json.dumps(debug_summary))
+    print("Env check:", json.dumps(debug_env))
 
-    missing = []
-    if not INSTANTLY_API_KEY:
-        missing.append("INSTANTLY_API_KEY")
-    if missing:
-        msg = {"error": "Missing required env variables", "missing": missing}
-        print("ERROR:", msg)
-        return {"status": "error", "detail": msg}
+    # ✅ Basic validation
+    if not INSTANTLY_API_KEY or not INSTANTLY_CAMPAIGN_ID:
+        return {"status": "error", "detail": "Missing Instantly API key or Campaign ID"}
 
-    headers = {"x-api-key": INSTANTLY_API_KEY}
+    # ✅ Prepare data for Instantly lead creation
+    lead_data = {
+        "campaignId": INSTANTLY_CAMPAIGN_ID,
+        "leads": [
+            {
+                "email": payload.get("email") or payload.get("Email") or "unknown@example.com",
+                "firstName": payload.get("first_name") or payload.get("First Name") or "",
+                "lastName": payload.get("last_name") or payload.get("Last Name") or "",
+                "companyName": payload.get("Deal Name / Company") or "",
+                "customVariables": {
+                    "industry": payload.get("Industry / Sector", ""),
+                    "country": payload.get("Country", ""),
+                    "ghl_id": payload.get("id", "")
+                }
+            }
+        ]
+    }
 
-    if any(v is None or not isinstance(v, (str, bytes)) for v in headers.values()):
-        print("ERROR: header(s) not string-safe")
-        return {"status": "error", "detail": "header value(s) must be str or bytes"}
+    print("=== Sending Lead to Instantly ===")
+    print(json.dumps(lead_data, indent=2))
 
-    instantly_url = "https://api.instantly.ai/whatever-endpoint"  # Replace with real Instantly endpoint
+    instantly_headers = {
+        "x-api-key": INSTANTLY_API_KEY,
+        "Content-Type": "application/json"
+    }
+
+    instantly_url = "https://api.instantly.ai/api/v1/leads/add"
+
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.post(instantly_url, json=payload, headers=headers)
-            print("Instantly status:", resp.status_code, "body:", resp.text[:2000])
+            resp = await client.post(instantly_url, headers=instantly_headers, json=lead_data)
+            print("Instantly response:", resp.status_code, resp.text[:1000])
     except Exception as e:
-        print("Instantly request exception:", type(e).__name__, str(e))
-        print("Trace:", "\n".join(traceback.format_exc().splitlines()[-6:]))
-        return {"status": "error", "stage": "instantly_call_failed", "error": str(e)}
+        print("Instantly Exception:", type(e).__name__, str(e))
+        print("Traceback:", traceback.format_exc())
+        return {"status": "error", "stage": "instantly_push_failed", "error": str(e)}
 
-    # ✅ Properly indented and simplified GHL webhook callback
+    # ✅ Send confirmation to GHL inbound webhook
     if GHL_WEBHOOK_URL:
         try:
-            data_to_send = {
-                "scoring_status": str(resp.status_code),
+            ghl_payload = {
+                "status": "Lead sent to Instantly",
+                "instantly_status": resp.status_code,
                 "deal_name": payload.get("Deal Name / Company", ""),
                 "industry": payload.get("Industry / Sector", ""),
-                "country": payload.get("country", ""),
-                "timestamp": payload.get("date_created", "")
+                "country": payload.get("Country", "")
             }
 
-            print(f"Sending to GHL inbound webhook: {GHL_WEBHOOK_URL}")
-            print(f"Payload being sent: {data_to_send}")
-
-            async with httpx.AsyncClient(timeout=15.0) as client:
-                ghl_resp = await client.post(GHL_WEBHOOK_URL, json=data_to_send)
-                print("GHL webhook response:", ghl_resp.status_code, ghl_resp.text[:500])
-
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                ghl_resp = await client.post(GHL_WEBHOOK_URL, json=ghl_payload)
+                print("GHL Webhook Response:", ghl_resp.status_code, ghl_resp.text[:500])
         except Exception as e:
-            print("Error sending data to GHL inbound webhook:", str(e))
-    else:
-        print("GHL_WEBHOOK_URL not found in environment.")
+            print("Error posting back to GHL:", str(e))
 
     return {"status": "success", "instantly_status": resp.status_code}
-
