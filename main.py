@@ -12,6 +12,7 @@ def masked(val):
     s = str(val)
     return s[:4] + "..." + s[-4:] if len(s) > 8 else s
 
+# ===== EXISTING WEBHOOK LOGIC =====
 @app.post("/webhook")
 async def inbound_webhook(request: Request):
     try:
@@ -23,7 +24,6 @@ async def inbound_webhook(request: Request):
     print("=== Incoming Webhook Payload ===")
     print(json.dumps(payload, indent=2))
 
-    # ✅ Environment variables
     INSTANTLY_API_KEY = os.getenv("INSTANTLY_API_KEY")
     INSTANTLY_CAMPAIGN_ID = os.getenv("INSTANTLY_CAMPAIGN_ID")
     GHL_WEBHOOK_URL = os.getenv("GHL_WEBHOOK_URL")
@@ -35,11 +35,9 @@ async def inbound_webhook(request: Request):
     }
     print("Env check:", json.dumps(debug_env))
 
-    # ✅ Basic validation
     if not INSTANTLY_API_KEY or not INSTANTLY_CAMPAIGN_ID:
         return {"status": "error", "detail": "Missing Instantly API key or Campaign ID"}
 
-    # ✅ Prepare data for Instantly lead creation
     lead_data = {
         "campaignId": INSTANTLY_CAMPAIGN_ID,
         "leads": [
@@ -76,7 +74,6 @@ async def inbound_webhook(request: Request):
         print("Traceback:", traceback.format_exc())
         return {"status": "error", "stage": "instantly_push_failed", "error": str(e)}
 
-    # ✅ Send confirmation to GHL inbound webhook
     if GHL_WEBHOOK_URL:
         try:
             ghl_payload = {
@@ -94,3 +91,58 @@ async def inbound_webhook(request: Request):
             print("Error posting back to GHL:", str(e))
 
     return {"status": "success", "instantly_status": resp.status_code}
+
+
+# ===== NEW: Apollo Test Endpoint =====
+@app.post("/test-pull-apollo")
+async def test_pull_apollo():
+    APOLLO_KEY = os.getenv("APOLLO_API_KEY")
+    APOLLO_LIST = os.getenv("APOLLO_LIST_ID")
+    INSTANTLY_KEY = os.getenv("INSTANTLY_API_KEY")
+    INSTANTLY_CAMPAIGN = os.getenv("INSTANTLY_CAMPAIGN_ID")
+
+    if not APOLLO_KEY or not APOLLO_LIST:
+        return {"error": "Missing APOLLO_API_KEY or APOLLO_LIST_ID in env"}
+
+    apollo_url = f"https://api.apollo.io/v1/lists/{APOLLO_LIST}/people"
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            headers = {"Authorization": f"Bearer {APOLLO_KEY}"}
+            ap_res = await client.get(apollo_url, headers=headers)
+            if ap_res.status_code != 200:
+                return {"error": "apollo_error", "status": ap_res.status_code, "body": ap_res.text}
+            ap_json = ap_res.json()
+            people = ap_json.get("people") or ap_json.get("results") or ap_json.get("data") or ap_json
+    except Exception as e:
+        return {"error": "apollo_request_failed", "exception": str(e)}
+
+    sample = []
+    for p in (people if isinstance(people, list) else people.get("items", []))[:20]:
+        sample.append({
+            "email": p.get("email") or p.get("contact_email"),
+            "first_name": p.get("first_name") or p.get("given_name") or "",
+            "last_name": p.get("last_name") or p.get("family_name") or "",
+            "company": p.get("company") or p.get("current_company") or "",
+            "title": p.get("title") or p.get("job_title") or ""
+        })
+
+    sample = [s for s in sample if s.get("email")]
+
+    if not sample:
+        return {"error": "no_leads_from_apollo", "raw_people_count": len(people) if people else 0}
+
+    if not INSTANTLY_KEY or not INSTANTLY_CAMPAIGN:
+        return {"warning": "no_instantly_env_vars", "preview_count": len(sample), "sample": sample[:3]}
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            inst_headers = {"x-api-key": INSTANTLY_KEY, "Content-Type": "application/json"}
+            body = {"campaign_id": INSTANTLY_CAMPAIGN, "leads": sample}
+            inst_res = await client.post("https://api.instantly.ai/api/v2/leads/import", headers=inst_headers, json=body)
+            return {
+                "apollo_count": len(sample),
+                "instantly_status": inst_res.status_code,
+                "instantly_body": inst_res.text[:1000]
+            }
+    except Exception as e:
+        return {"error": "instantly_error", "exception": str(e)}
