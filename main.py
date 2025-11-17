@@ -104,7 +104,7 @@ async def test_pull_apollo():
     if not APOLLO_KEY or not APOLLO_LIST:
         return {"error": "Missing APOLLO_API_KEY or APOLLO_LIST_ID in env"}
 
-    apollo_url = f"https://api.apollo.io/v2/lists/{APOLLO_LIST}/people"
+    apollo_url = f"https://api.apollo.io/v2/contacts/list/{APOLLO_LIST}"
     try:
         async with httpx.AsyncClient(timeout=20.0) as client:
             headers = {"Authorization": f"Bearer {APOLLO_KEY}"}
